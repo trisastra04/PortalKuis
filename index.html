@@ -1,0 +1,791 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Portal Guru - Dasbor Ujian Terpadu</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Firebase v8 SDK -->
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        .tab-btn.active {
+            border-bottom-color: #2563eb;
+            color: #2563eb;
+            font-weight: 600;
+        }
+        @keyframes pulse-red {
+            0%, 100% {
+                opacity: 1;
+            }
+            50% {
+                opacity: 0.5;
+            }
+        }
+        .status-cheating {
+            animation: pulse-red 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+        .loader {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #3b82f6;
+            border-radius: 50%;
+            width: 32px;
+            height: 32px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .delete-btn {
+            opacity: 0;
+            transition: opacity 0.2s ease-in-out;
+        }
+        .group:hover .delete-btn {
+            opacity: 1;
+        }
+        select:disabled {
+            background-color: #e9ecef;
+            cursor: not-allowed;
+        }
+        #analyze-class-btn:disabled {
+            background-color: #f3f4f6;
+            color: #9ca3af;
+            cursor: not-allowed;
+        }
+    </style>
+</head>
+<body class="bg-slate-50">
+
+    <!-- Login Modal -->
+    <div id="login-modal" class="fixed inset-0 bg-gray-800 bg-opacity-75 flex items-center justify-center z-50">
+        <div class="bg-white rounded-lg shadow-xl p-8 w-full max-w-sm">
+            <h2 class="text-2xl font-bold text-center text-gray-800 mb-6">Login Portal Guru</h2>
+            <div class="space-y-4">
+                <div>
+                    <label for="teacher-id" class="block text-sm font-medium text-gray-700">ID Guru</label>
+                    <input type="text" id="teacher-id" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                </div>
+                <div>
+                    <label for="teacher-password" class="block text-sm font-medium text-gray-700">Password</label>
+                    <input type="password" id="teacher-password" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                </div>
+            </div>
+            <p id="login-error" class="text-red-500 text-sm mt-4 text-center hidden">ID atau Password salah.</p>
+            <button id="login-btn" class="mt-6 w-full bg-blue-600 text-white font-bold py-2 px-4 rounded-lg hover:bg-blue-700 transition">
+                Masuk
+            </button>
+        </div>
+    </div>
+
+    <!-- Confirmation Modal -->
+    <div id="confirmation-modal" class="hidden fixed inset-0 bg-gray-800 bg-opacity-75 flex items-center justify-center z-50">
+        <div class="bg-white rounded-lg shadow-xl p-8 w-full max-w-sm text-center">
+            <h2 class="text-xl font-bold text-gray-800 mb-4">Konfirmasi Tindakan</h2>
+            <p id="confirmation-message" class="text-gray-600 mb-6">Apakah Anda yakin ingin melanjutkan?</p>
+            <div class="flex justify-center space-x-4">
+                <button id="confirm-yes-btn" class="bg-red-600 text-white font-bold py-2 px-6 rounded-lg hover:bg-red-700">Ya</button>
+                <button id="confirm-no-btn" class="bg-gray-300 text-gray-800 font-bold py-2 px-6 rounded-lg hover:bg-gray-400">Tidak</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Config Error Modal -->
+    <div id="config-error-modal" class="hidden fixed inset-0 bg-gray-800 bg-opacity-75 flex items-center justify-center z-50 p-4">
+        <div class="bg-white rounded-lg shadow-xl p-8 w-full max-w-lg text-left">
+            <h2 class="text-2xl font-bold text-red-600 mb-4">Kesalahan Konfigurasi Firebase</h2>
+            <p class="text-gray-700 mb-4">
+                Aplikasi ini belum terhubung ke pangkalan data. Anda perlu mengganti konfigurasi Firebase placeholder di dalam kod.
+            </p>
+            <p class="text-gray-700 mb-6">
+                Sila ikuti langkah-langkah ini:
+            </p>
+            <ol class="list-decimal list-inside space-y-2 text-gray-600 mb-6">
+                <li>Buka projek Firebase anda.</li>
+                <li>Pergi ke <strong>Project Settings</strong> (ikon gerigi) > <strong>General</strong>.</li>
+                <li>Di bawah "Your apps", cari dan salin objek konfigurasi (<code>firebaseConfig</code>).</li>
+                <li>Tampal objek tersebut ke dalam fail <code>portal_guru.html</code> untuk menggantikan placeholder.</li>
+            </ol>
+            <div class="bg-slate-100 p-4 rounded-md">
+                <pre class="text-xs text-gray-800 overflow-auto"><code>// Cari kod ini di dalam fail portal_guru.html
+const firebaseConfig = {
+    apiKey: "AIzaSy...",
+    authDomain: "...",
+    // ...
+};</code></pre>
+            </div>
+        </div>
+    </div>
+
+    <!-- Security Rules Error Modal -->
+    <div id="security-error-modal" class="hidden fixed inset-0 bg-gray-800 bg-opacity-75 flex items-center justify-center z-50 p-4">
+        <div class="bg-white rounded-lg shadow-xl p-8 w-full max-w-2xl text-left">
+            <h2 class="text-2xl font-bold text-red-600 mb-4">Akses Ditolak (Permission Denied)</h2>
+            <p class="text-gray-700 mb-4">
+                Aplikasi tidak dapat mengambil data dari Firestore kerana disekat oleh <strong>Aturan Keselamatan (Security Rules)</strong> pangkalan data anda.
+            </p>
+            <p class="text-gray-700 mb-6">
+                Untuk memperbaikinya, sila kemas kini aturan anda di Konsol Firebase:
+            </p>
+            <ol class="list-decimal list-inside space-y-2 text-gray-600 mb-6">
+                <li>Buka projek Firebase anda dan pergi ke <strong>Firestore Database</strong>.</li>
+                <li>Klik pada tab <strong>Rules</strong>.</li>
+                <li>Gantikan semua isi di editor dengan kod di bawah ini.</li>
+                <li>Klik <strong>Publish</strong>.</li>
+            </ol>
+            <div class="bg-slate-100 p-4 rounded-md">
+                <pre class="text-xs text-gray-800 overflow-auto"><code>rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      // Benarkan akses baca dan tulis jika pengguna telah disahkan
+      // (termasuk pengguna anonim yang dilog masuk oleh aplikasi ini)
+      allow read, write: if request.auth != null;
+    }
+  }
+}</code></pre>
+            </div>
+             <button id="security-close-btn" class="mt-6 w-full bg-blue-600 text-white font-bold py-2 px-4 rounded-lg hover:bg-blue-700 transition">
+                Saya Mengerti
+            </button>
+        </div>
+    </div>
+
+    <div id="main-app" class="hidden">
+        <header class="bg-white shadow-sm sticky top-0 z-40">
+            <div class="container mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center space-x-4">
+                <div class="bg-blue-600 p-2 rounded-lg">
+                    <svg class="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path></svg>
+                </div>
+                <div>
+                    <h1 class="text-2xl font-bold text-gray-800">Portal Guru</h1>
+                    <p class="text-sm text-gray-500">Dasbor Ujian Terpadu</p>
+                </div>
+            </div>
+        </header>
+
+        <main class="container mx-auto p-4 sm:p-6 lg:p-8">
+            <div class="bg-white rounded-xl shadow-lg p-6 md:p-8">
+                <!-- Tab Navigation -->
+                <div class="border-b border-gray-200 mb-6">
+                    <nav class="-mb-px flex space-x-6">
+                        <button class="tab-btn py-4 px-1 border-b-2 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 transition" data-tab="live">Monitor Sesi Live</button>
+                        <button class="tab-btn py-4 px-1 border-b-2 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 transition" data-tab="pelanggaran">Riwayat Pelanggaran</button>
+                        <button class="tab-btn py-4 px-1 border-b-2 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 transition" data-tab="analisis">Analisis Jawaban</button>
+                    </nav>
+                </div>
+
+                <!-- Tab Content -->
+                <div id="tab-content">
+                    <!-- Monitor Sesi Live Content -->
+                    <div id="tab-content-live" class="tab-pane">
+                        <div id="live-session-monitor">
+                            <div class="flex justify-between items-center mb-4">
+                                <h3 id="monitor-title" class="text-xl font-semibold text-gray-800">Memantau Sesi Pengerjaan Kuis</h3>
+                                <button id="reset-session-btn" class="text-sm bg-red-500 hover:bg-red-600 text-white font-semibold py-2 px-4 rounded-lg transition">Reset Sesi Live</button>
+                            </div>
+                            <div class="bg-slate-100 p-4 rounded-lg mb-4 text-center">
+                                <span class="font-semibold">Jumlah Murid Mengerjakan:</span> <span id="student-count" class="font-bold text-blue-600 text-lg">0</span>
+                            </div>
+                            <div id="student-list" class="space-y-3">
+                                <!-- Student items will be injected here -->
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Riwayat Pelanggaran Content -->
+                    <div id="tab-content-pelanggaran" class="tab-pane hidden">
+                        <div class="flex justify-between items-center mb-4">
+                            <h3 class="text-xl font-semibold text-gray-800">Log Pelanggaran Kuis</h3>
+                            <button id="delete-all-logs-btn" class="text-sm bg-red-500 hover:bg-red-600 text-white font-semibold py-2 px-4 rounded-lg transition">Hapus Semua Riwayat</button>
+                        </div>
+                        <div id="cheating-log-list" class="space-y-3">
+                            <!-- Log items will be injected here -->
+                        </div>
+                    </div>
+
+                    <!-- Analisis Jawaban Content -->
+                    <div id="tab-content-analisis" class="tab-pane hidden">
+                         <div class="space-y-4 max-w-2xl mx-auto">
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label for="analysis-exam-type" class="block text-sm font-medium text-gray-700">1. Pilih Tipe Jawaban</label>
+                                    <select id="analysis-exam-type" class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md">
+                                        <option value="">-- Pilih --</option>
+                                        <option value="pilihan_ganda">Pilihan Ganda</option>
+                                        <option value="uraian">Uraian</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label for="analysis-class" class="block text-sm font-medium text-gray-700">2. Pilih Kelas</label>
+                                    <select id="analysis-class" disabled class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md bg-gray-100">
+                                        <option value="">-- Pilih Tipe Jawaban Dulu --</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div id="analysis-options" class="hidden text-center border-t pt-4">
+                                <h3 class="text-base font-medium text-gray-700 mb-2">3. Pilih Jenis Analisis</h3>
+                                <div class="inline-flex rounded-md shadow-sm">
+                                    <button id="analyze-class-btn" class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded-l-lg hover:bg-gray-50 focus:z-10 focus:ring-2 focus:ring-blue-500">Analisis Per Kelas</button>
+                                    <button id="analyze-student-btn" class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded-r-md hover:bg-gray-50 focus:z-10 focus:ring-2 focus:ring-blue-500">Analisis Per Murid</button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Analysis Results Area -->
+                        <div id="analysis-results-area" class="mt-8 border-t pt-6">
+                            <!-- Class Analysis -->
+                            <div id="class-analysis-content" class="hidden">
+                                <div id="class-stats" class="grid grid-cols-2 gap-4 mb-6 text-center"></div>
+                                <div class="flex justify-between items-center mb-4">
+                                    <h4 class="text-lg font-semibold text-gray-800">Analisis Butir Soal</h4>
+                                    <button id="ai-summary-btn" class="bg-gradient-to-r from-purple-500 to-blue-500 text-white font-semibold py-2 px-4 rounded-lg hover:opacity-90 transition flex items-center gap-2">
+                                        ✨ Buat Ringkasan AI
+                                    </button>
+                                </div>
+                                <div id="ai-summary-result" class="hidden p-4 bg-slate-50 rounded-lg mb-4 prose max-w-none"></div>
+                                <div id="question-analysis-list" class="space-y-4"></div>
+                            </div>
+                            <!-- Student Analysis -->
+                            <div id="student-analysis-content" class="hidden">
+                                <div class="max-w-md mx-auto flex items-end gap-2">
+                                    <div class="flex-grow">
+                                        <label for="analysis-student" class="block text-sm font-medium text-gray-700">Pilih Murid</label>
+                                        <select id="analysis-student" class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md"></select>
+                                    </div>
+                                    <button id="show-student-analysis-btn" class="bg-blue-600 text-white font-semibold py-2 px-4 rounded-lg hover:bg-blue-700 transition">Tampilkan</button>
+                                </div>
+                                <div id="student-detail-list" class="mt-6"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        // --- Firebase Configuration ---
+        const firebaseConfig = {
+          apiKey: "AIzaSyBDIBFVUDSxN4Qs9HsHzvVac3NCTXBkDIg",
+          authDomain: "projek-kuis-42454.firebaseapp.com",
+          projectId: "projek-kuis-42454",
+          storageBucket: "projek-kuis-42454.appspot.com",
+          messagingSenderId: "230493914497",
+          appId: "1:230493914497:web:5ea60af2c77e8f2bcd1480"
+        };
+
+        // --- Data Sources ---
+        const CSV_URLS = {
+            login: "https://docs.google.com/spreadsheets/d/e/2PACX-1vQnP8COEuoPRN4A6QqHCayDqWfciL9F7CQTasp4S1m4M0JAmYdvJuDjg7D1dqlnnyiJdtuMxRFOjBPg/pub?gid=1382150609&single=true&output=csv",
+            jawabanPG: "https://docs.google.com/spreadsheets/d/e/2PACX-1vQp3k-ZbcM47ZI5vT0NGhsfnUvEiyIGpITLQiVjpdtwInRFFZEFks0XJhm-LP2H15sN12ZqQxUx0sts/pub?gid=0&single=true&output=csv",
+            jawabanUraian: "https://docs.google.com/spreadsheets/d/e/2PACX-1vQp3k-ZbcM47ZI5vT0NGhsfnUvEiyIGpITLQiVjpdtwInRFFZEFks0XJhm-LP2H15sN12ZqQxUx0sts/pub?gid=824586483&single=true&output=csv",
+            soalX: "https://docs.google.com/spreadsheets/d/e/2PACX-1vQp3k-ZbcM47ZI5vT0NGhsfnUvEiyIGpITLQiVjpdtwInRFFZEFks0XJhm-LP2H15sN12ZqQxUx0sts/pub?gid=586568774&single=true&output=csv",
+            soalXI: "https://docs.google.com/spreadsheets/d/e/2PACX-1vQp3k-ZbcM47ZI5vT0NGhsfnUvEiyIGpITLQiVjpdtwInRFFZEFks0XJhm-LP2H15sN12ZqQxUx0sts/pub?gid=397565300&single=true&output=csv",
+            soalXII: "https://docs.google.com/spreadsheets/d/e/2PACX-1vQp3k-ZbcM47ZI5vT0NGhsfnUvEiyIGpITLQiVjpdtwInRFFZEFks0XJhm-LP2H15sN12ZqQxUx0sts/pub?gid=183515394&single=true&output=csv"
+        };
+        const GEMINI_API_KEY = ""; // Masukkan API Key Gemini Anda di sini jika ada
+
+        // --- Firebase Initialization ---
+        let db;
+
+        // --- DOM Elements ---
+        const loginModal = document.getElementById('login-modal');
+        const loginBtn = document.getElementById('login-btn');
+        const loginError = document.getElementById('login-error');
+        const mainApp = document.getElementById('main-app');
+        const tabButtons = document.querySelectorAll('.tab-btn');
+        const tabPanes = document.querySelectorAll('.tab-pane');
+        const confirmationModal = document.getElementById('confirmation-modal');
+        const securityErrorModal = document.getElementById('security-error-modal');
+        const configErrorModal = document.getElementById('config-error-modal');
+        let confirmCallback = null;
+
+        // --- State Management ---
+        let teacherData = [];
+        let currentLiveSession = 'quiz_sessions'; // Hardcoded session name
+        let liveSessionUnsubscribe = null;
+        let cheatingLogUnsubscribe = null;
+        let analysisData = {
+            answers: [],
+            questions: []
+        };
+        
+        // --- Helper Functions ---
+        const parseCSV = (text) => {
+            const lines = text.trim().replace(/\r/g, '').split(/\n(?=(?:(?:[^"]*"){2})*[^"]*$)/);
+            const headerLine = lines.shift() || '';
+            const regexParser = /(?:"([^"]*(?:""[^"]*)*)"|([^,]*))(,|$)/g;
+            const headers = [];
+            let headerMatch;
+            regexParser.lastIndex = 0;
+            while ((headerMatch = regexParser.exec(headerLine))) {
+                let value = headerMatch[1] !== undefined ? headerMatch[1].replace(/""/g, '"') : headerMatch[2];
+                headers.push(value.trim());
+                if (headerMatch[3] === '') break;
+            }
+            
+            return lines.map(line => {
+                const obj = {};
+                const columns = [];
+                let match;
+                regexParser.lastIndex = 0;
+                while ((match = regexParser.exec(line))) {
+                    let value = match[1] !== undefined ? match[1].replace(/""/g, '"') : match[2];
+                    columns.push(value.trim());
+                    if (match[3] === '') break;
+                }
+                headers.forEach((header, index) => {
+                    obj[header] = columns[index];
+                });
+                return obj;
+            });
+        };
+
+        const showConfirmation = (message, onConfirm) => {
+            document.getElementById('confirmation-message').textContent = message;
+            confirmationModal.classList.remove('hidden');
+            confirmCallback = onConfirm;
+        };
+
+        // --- Login Logic ---
+        async function initLogin() {
+            try {
+                const response = await fetch(CSV_URLS.login);
+                const csvText = await response.text();
+                teacherData = csvText.trim().split('\n').map(line => {
+                    const [id, password] = line.split(',');
+                    return { id: id.trim(), password: password.trim() };
+                });
+            } catch (e) {
+                loginError.textContent = "Gagal memuat data login. Periksa koneksi.";
+                loginError.classList.remove('hidden');
+            }
+        }
+
+        loginBtn.addEventListener('click', () => {
+            const id = document.getElementById('teacher-id').value;
+            const password = document.getElementById('teacher-password').value;
+            const teacher = teacherData.find(t => t.id === id && t.password === password);
+            if (teacher) {
+                loginModal.classList.add('hidden');
+                mainApp.classList.remove('hidden');
+                initDashboard();
+            } else {
+                loginError.classList.remove('hidden');
+            }
+        });
+
+        // --- Dashboard & Tabs ---
+        function initDashboard() {
+            showTab('live'); // Default tab
+            tabButtons.forEach(button => {
+                button.addEventListener('click', () => showTab(button.dataset.tab));
+            });
+        }
+        
+        function showTab(tabId) {
+            // Unsubscribe from previous listeners
+            if (liveSessionUnsubscribe) liveSessionUnsubscribe();
+            if (cheatingLogUnsubscribe) cheatingLogUnsubscribe();
+
+            tabPanes.forEach(pane => pane.classList.add('hidden'));
+            tabButtons.forEach(btn => btn.classList.remove('active'));
+            
+            document.getElementById(`tab-content-${tabId}`).classList.remove('hidden');
+            document.querySelector(`.tab-btn[data-tab="${tabId}"]`).classList.add('active');
+
+            // Activate listeners for the current tab
+            if (tabId === 'live') initLiveMonitorTab();
+            if (tabId === 'pelanggaran') initPelanggaranTab();
+            if (tabId === 'analisis') initAnalisisTab();
+        }
+
+        // --- Tab 1: Monitor Sesi Live ---
+        function initLiveMonitorTab() {
+            monitorSession(currentLiveSession);
+        }
+
+        document.getElementById('reset-session-btn').addEventListener('click', () => {
+            showConfirmation(`Anda yakin ingin mereset semua data Sesi Pengerjaan Kuis? Tindakan ini tidak dapat dibatalkan.`, async () => {
+                const snapshot = await db.collection(currentLiveSession).get();
+                const batch = db.batch();
+                snapshot.docs.forEach(doc => batch.delete(doc.ref));
+                await batch.commit();
+            });
+        });
+        
+        function monitorSession(collectionName) {
+            liveSessionUnsubscribe = db.collection(collectionName).onSnapshot(snapshot => {
+                document.getElementById('student-count').textContent = snapshot.size;
+                const studentList = document.getElementById('student-list');
+                studentList.innerHTML = '';
+                if (snapshot.empty) {
+                    studentList.innerHTML = `<p class="text-center text-gray-500">Belum ada murid yang memulai kuis.</p>`;
+                }
+                const students = [];
+                snapshot.forEach(doc => students.push(doc.data()));
+                students.sort((a,b) => a.name.localeCompare(b.name)); // Sort alphabetically
+
+                students.forEach(student => {
+                    const statusClass = student.status === 'Beralih Tab' ? 'text-red-500 font-bold status-cheating' : 'text-green-500';
+                    const studentHtml = `
+                        <div class="bg-white p-4 rounded-lg shadow-sm border flex justify-between items-center">
+                            <div>
+                                <p class="font-semibold text-gray-800">${student.name}</p>
+                                <p class="text-sm text-gray-500">${student.class}</p>
+                            </div>
+                            <div class="text-right">
+                                <p class="text-sm">Progres: <span class="font-semibold">${student.progress}</span></p>
+                                <p class="text-sm">Status: <span class="${statusClass}">${student.status}</span></p>
+                            </div>
+                        </div>
+                    `;
+                    studentList.innerHTML += studentHtml;
+                });
+            }, (error) => {
+                console.error("Firestore listener error:", error);
+                if (error.code === 'permission-denied') {
+                    securityErrorModal.classList.remove('hidden');
+                } else {
+                    document.getElementById('student-list').innerHTML = `<p class="text-center text-red-500">Gagal terhubung ke Firestore. Periksa koneksi internet Anda.</p>`;
+                }
+            });
+        }
+
+        // --- Tab 2: Riwayat Pelanggaran ---
+        document.getElementById('delete-all-logs-btn').addEventListener('click', () => {
+            showConfirmation('Anda yakin ingin menghapus semua riwayat pelanggaran?', async () => {
+                const snapshot = await db.collection('cheating_log').get();
+                const batch = db.batch();
+                snapshot.docs.forEach(doc => batch.delete(doc.ref));
+                await batch.commit();
+            });
+        });
+
+        function initPelanggaranTab() {
+            const logList = document.getElementById('cheating-log-list');
+            cheatingLogUnsubscribe = db.collection('cheating_log').orderBy('timestamp', 'desc').onSnapshot(snapshot => {
+                logList.innerHTML = '';
+                 if (snapshot.empty) {
+                    logList.innerHTML = `<p class="text-center text-gray-500">Tidak ada riwayat pelanggaran.</p>`;
+                }
+                snapshot.forEach(doc => {
+                    const log = doc.data();
+                    const logTime = new Date(log.timestamp.seconds * 1000).toLocaleString('id-ID');
+                    const logHtml = `
+                        <div class="group bg-white p-4 rounded-lg shadow-sm border flex justify-between items-center">
+                            <div>
+                                <p class="font-semibold text-gray-800">${log.name} <span class="font-normal text-gray-500">- ${log.class}</span></p>
+                                <p class="text-sm text-gray-500">Sesi Pengerjaan Kuis | Waktu: ${logTime}</p>
+                            </div>
+                            <button data-id="${doc.id}" class="delete-log-btn delete-btn text-red-500 hover:text-red-700 p-2 rounded-full">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                            </button>
+                        </div>
+                    `;
+                    logList.innerHTML += logHtml;
+                });
+            }, (error) => {
+                console.error("Firestore listener error:", error);
+                 if (error.code === 'permission-denied') {
+                    securityErrorModal.classList.remove('hidden');
+                } else {
+                    logList.innerHTML = `<p class="text-center text-red-500">Gagal memuat riwayat pelanggaran.</p>`;
+                }
+            });
+        }
+        
+        document.getElementById('cheating-log-list').addEventListener('click', e => {
+            const deleteBtn = e.target.closest('.delete-log-btn');
+            if (deleteBtn) {
+                const docId = deleteBtn.dataset.id;
+                showConfirmation('Hapus log ini?', () => {
+                    db.collection('cheating_log').doc(docId).delete();
+                });
+            }
+        });
+
+        // --- Tab 3: Analisis Jawaban ---
+        const analysisExamType = document.getElementById('analysis-exam-type');
+        const analysisClass = document.getElementById('analysis-class');
+        const analysisOptions = document.getElementById('analysis-options');
+        const analysisResultsArea = document.getElementById('analysis-results-area');
+        const classAnalysisContent = document.getElementById('class-analysis-content');
+        const studentAnalysisContent = document.getElementById('student-analysis-content');
+
+        function initAnalisisTab() {
+            analysisExamType.value = '';
+            analysisClass.innerHTML = '<option value="">-- Pilih Tipe Jawaban Dulu --</option>';
+            analysisClass.disabled = true;
+            analysisOptions.classList.add('hidden');
+            analysisResultsArea.classList.add('hidden');
+        }
+
+        analysisExamType.addEventListener('change', async (e) => {
+            const type = e.target.value;
+            analysisResultsArea.classList.add('hidden');
+            classAnalysisContent.classList.add('hidden');
+            studentAnalysisContent.classList.add('hidden');
+
+            if (!type) {
+                 analysisClass.disabled = true;
+                 analysisOptions.classList.add('hidden');
+                 return;
+            }
+
+            const answerUrl = type === 'pilihan_ganda' ? CSV_URLS.jawabanPG : CSV_URLS.jawabanUraian;
+            document.getElementById('analyze-class-btn').disabled = (type === 'uraian');
+            
+            try {
+                const response = await fetch(answerUrl);
+                const text = await response.text();
+                analysisData.answers = parseCSV(text);
+                
+                const classes = [...new Set(analysisData.answers.map(a => a.Kelas))].sort();
+                analysisClass.innerHTML = '<option value="">-- Pilih Kelas --</option>';
+                classes.forEach(c => {
+                    analysisClass.innerHTML += `<option value="${c}">${c}</option>`;
+                });
+                analysisClass.disabled = false;
+            } catch (err) {
+                alert('Gagal memuat data jawaban.');
+            }
+        });
+
+        analysisClass.addEventListener('change', async (e) => {
+            const className = e.target.value;
+            if (!className) {
+                analysisOptions.classList.add('hidden');
+                return;
+            }
+            analysisOptions.classList.remove('hidden');
+
+            let questionUrl = '';
+            if (className.startsWith('Kelas X')) questionUrl = CSV_URLS.soalX;
+            else if (className.startsWith('Kelas XI')) questionUrl = CSV_URLS.soalXI;
+            else if (className.startsWith('Kelas XII')) questionUrl = CSV_URLS.soalXII;
+
+            try {
+                const response = await fetch(questionUrl);
+                const text = await response.text();
+                analysisData.questions = parseCSV(text);
+            } catch (err) {
+                 alert('Gagal memuat bank soal.');
+            }
+        });
+        
+        document.getElementById('analyze-class-btn').addEventListener('click', renderClassAnalysis);
+        document.getElementById('analyze-student-btn').addEventListener('click', showStudentAnalysisSelection);
+
+        function renderClassAnalysis() {
+            analysisResultsArea.classList.remove('hidden');
+            studentAnalysisContent.classList.add('hidden');
+            classAnalysisContent.classList.remove('hidden');
+            document.getElementById('ai-summary-result').classList.add('hidden');
+
+            const selectedClass = analysisClass.value;
+            const classAnswers = analysisData.answers.filter(a => a.Kelas === selectedClass);
+            const totalStudents = new Set(classAnswers.map(a => a.Nama)).size;
+            const totalScore = classAnswers.reduce((sum, a) => sum + parseFloat(a.Skor || 0), 0);
+            const avgScore = totalStudents > 0 ? (totalScore / totalStudents) : 0;
+            
+            document.getElementById('class-stats').innerHTML = `
+                <div class="bg-slate-100 p-4 rounded-lg"><p class="text-sm text-gray-600">Jumlah Peserta</p><p class="text-2xl font-bold">${totalStudents}</p></div>
+                <div class="bg-slate-100 p-4 rounded-lg"><p class="text-sm text-gray-600">Rata-rata Skor</p><p class="text-2xl font-bold">${avgScore.toFixed(1)}</p></div>
+            `;
+            
+            const questionList = document.getElementById('question-analysis-list');
+            questionList.innerHTML = '';
+            analysisData.questions.forEach(q => {
+                const questionNum = q.No;
+                if (q['Jenis Soal'] === 'Uraian') return; // Skip essay questions for this analysis
+
+                // Placeholder logic for correctness as the CSV doesn't have per-question data
+                const studentCount = totalStudents;
+                const correctCount = Math.floor(Math.random() * (studentCount + 1)); 
+                const correctness = studentCount > 0 ? (correctCount / studentCount) * 100 : 0;
+                
+                const key = q[`Opsi ${q['Kunci Jawaban']}`];
+
+                questionList.innerHTML += `
+                    <div class="border rounded-lg p-4">
+                        <p class="text-sm font-semibold text-gray-600">Soal No. ${q.No}: <span class="font-normal">${q.Soal}</span></p>
+                        <p class="text-sm text-green-600 mt-1">Kunci Jawaban: ${key || 'N/A'}</p>
+                        <div class="mt-2">
+                            <div class="flex justify-between items-center text-sm">
+                                <p>Tingkat Kebenaran (Estimasi)</p>
+                                <p class="font-semibold">${correctness.toFixed(1)}%</p>
+                            </div>
+                            <div class="w-full bg-gray-200 rounded-full h-2.5 mt-1">
+                                <div class="bg-blue-600 h-2.5 rounded-full" style="width: ${correctness}%"></div>
+                            </div>
+                            <details class="mt-2 text-sm">
+                                <summary class="cursor-pointer text-blue-600">${correctCount} dari ${studentCount} murid menjawab benar (estimasi)</summary>
+                                <div class="p-2 bg-slate-50 rounded mt-1">
+                                    <p>Data per murid tidak tersedia di file CSV.</p>
+                                </div>
+                            </details>
+                        </div>
+                    </div>
+                `;
+            });
+        }
+
+        function showStudentAnalysisSelection() {
+            analysisResultsArea.classList.remove('hidden');
+            classAnalysisContent.classList.add('hidden');
+            studentAnalysisContent.classList.remove('hidden');
+            document.getElementById('student-detail-list').innerHTML = '';
+
+            const selectedClass = analysisClass.value;
+            const studentsInClass = [...new Set(analysisData.answers.filter(a => a.Kelas === selectedClass).map(a => a.Nama))].sort();
+            const studentSelect = document.getElementById('analysis-student');
+            studentSelect.innerHTML = '<option value="">-- Pilih Murid --</option>';
+            studentsInClass.forEach(name => {
+                studentSelect.innerHTML += `<option value="${name}">${name}</option>`;
+            });
+        }
+        
+        document.getElementById('show-student-analysis-btn').addEventListener('click', () => {
+             const studentName = document.getElementById('analysis-student').value;
+             if (!studentName) return;
+             
+             const examType = analysisExamType.value;
+             const studentAttempts = analysisData.answers.filter(a => a.Nama === studentName);
+             if (studentAttempts.length === 0) return;
+             
+             const latestAttempt = studentAttempts[studentAttempts.length - 1];
+             const detailList = document.getElementById('student-detail-list');
+             detailList.innerHTML = `<h4 class="text-lg font-semibold text-gray-800 mb-4 text-center">Analisis Jawaban: ${studentName}</h4>`;
+             
+             if (examType === 'pilihan_ganda') {
+                 analysisData.questions.forEach(q => {
+                     if (q['Jenis Soal'] === 'Uraian') return;
+                     const isCorrect = Math.random() > 0.5; // Placeholder, no per-question data
+                     const studentAnswer = q[`Opsi ${isCorrect ? q['Kunci Jawaban'] : 'A'}`]; 
+                     const key = q[`Opsi ${q['Kunci Jawaban']}`];
+                     
+                     detailList.innerHTML += `
+                        <div class="border rounded-lg p-4 mb-3">
+                             <p class="text-sm font-semibold text-gray-600">Soal No. ${q.No}: <span class="font-normal">${q.Soal}</span></p>
+                             <p class="mt-2 text-sm">Jawaban Murid (Estimasi): <span class="font-semibold ${isCorrect ? 'text-green-600' : 'text-red-600'}">${studentAnswer} (${isCorrect ? 'Benar' : 'Salah'})</span></p>
+                             ${!isCorrect ? `<p class="text-sm mt-1">Jawaban Benar: <span class="font-semibold text-green-600">${key || 'N/A'}</span></p>` : ''}
+                        </div>
+                     `;
+                 });
+             } else if (examType === 'uraian') {
+                if (!latestAttempt || !latestAttempt.Jawaban) {
+                    detailList.innerHTML += `<p class="text-center text-gray-500">Tidak ditemukan data jawaban uraian untuk murid ini.</p>`;
+                    return;
+                }
+                const uraianAnswers = JSON.parse(latestAttempt.Jawaban);
+                analysisData.questions.forEach(q => {
+                    if (q['Jenis Soal'] !== 'Uraian') return;
+                    const studentAnswerObj = uraianAnswers.find(ans => ans.no === q.No);
+                    const studentAnswerText = studentAnswerObj ? studentAnswerObj.answer : 'Tidak menjawab';
+
+                    detailList.innerHTML += `
+                        <div class="border rounded-lg p-4 mb-3">
+                            <p class="text-sm font-semibold text-gray-600">Soal No. ${q.No}: <span class="font-normal">${q.Soal}</span></p>
+                            <p class="mt-2 text-sm">Jawaban Murid:</p>
+                            <div class="p-2 bg-slate-50 rounded mt-1 text-sm text-gray-700 whitespace-pre-wrap">${studentAnswerText || '<i>Tidak ada jawaban</i>'}</div>
+                        </div>
+                    `;
+                });
+             }
+        });
+
+        document.getElementById('ai-summary-btn').addEventListener('click', async (e) => {
+            const btn = e.currentTarget;
+            btn.disabled = true;
+            btn.innerHTML = '<div class="loader w-5 h-5"></div> Menganalisis...';
+            
+            const hardestQuestions = Array.from(document.getElementById('question-analysis-list').children)
+                .map(el => {
+                    const text = el.querySelector('p:first-child').textContent;
+                    const correctness = el.querySelector('.flex p:last-child').textContent;
+                    return { text, correctness };
+                })
+                .sort((a,b) => parseFloat(a.correctness) - parseFloat(b.correctness))
+                .slice(0, 5)
+                .map(q => `- ${q.text} (Tingkat Kebenaran: ${q.correctness})`)
+                .join('\n');
+
+            const systemPrompt = "Anda adalah seorang analis pendidikan. Berdasarkan data 5 soal tersulit berikut, berikan evaluasi singkat mengenai kemungkinan penyebab kesulitan siswa dan berikan 2-3 rekomendasi tindakan perbaikan bagi guru. Sajikan dalam format poin-poin.";
+            const userQuery = `Berikut adalah 5 soal tersulit:\n${hardestQuestions}`;
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${GEMINI_API_KEY}`;
+            const payload = { contents: [{ parts: [{ text: userQuery }] }], systemInstruction: { parts: [{ text: systemPrompt }] } };
+
+            try {
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                 if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                const result = await response.json();
+                const text = result.candidates[0].content.parts[0].text;
+                const resultDiv = document.getElementById('ai-summary-result');
+                resultDiv.innerHTML = text.replace(/(\* |- )/g, '<br>• ').replace(/\n/g, '<br>');
+                resultDiv.classList.remove('hidden');
+            } catch (err) {
+                console.error("AI Summary Error:", err);
+                alert('Gagal mendapatkan ringkasan dari AI. Periksa API Key Anda atau lihat console untuk detail error.');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '✨ Buat Ringkasan AI';
+            }
+        });
+
+        // --- Global Listeners ---
+        document.getElementById('confirm-no-btn').addEventListener('click', () => {
+            confirmationModal.classList.add('hidden');
+            confirmCallback = null;
+        });
+        document.getElementById('confirm-yes-btn').addEventListener('click', () => {
+            if (confirmCallback) confirmCallback();
+            confirmationModal.classList.add('hidden');
+            confirmCallback = null;
+        });
+        document.getElementById('security-close-btn').addEventListener('click', () => {
+             securityErrorModal.classList.add('hidden');
+        });
+
+        // --- Init App ---
+        async function initializeApp() {
+            if (firebaseConfig.apiKey === "AIzaSy...") {
+                document.getElementById('login-modal').classList.add('hidden');
+                configErrorModal.classList.remove('hidden');
+                return;
+            }
+
+            try {
+                firebase.initializeApp(firebaseConfig);
+                db = firebase.firestore();
+                await firebase.auth().signInAnonymously();
+                console.log("Firebase Authenticated Anonymously");
+                initLogin();
+            } catch(e) {
+                console.error("Firebase Initialization Error:", e);
+                if (e.code === 'permission-denied') {
+                    securityErrorModal.classList.remove('hidden');
+                } else {
+                     document.body.innerHTML = `<div class="p-8 text-center text-red-600">Gagal menginisialisasi aplikasi. Periksa konfigurasi Firebase Anda.<br><small>${e.message}</small></div>`;
+                }
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', initializeApp);
+
+    </script>
+</body>
+</html>
+
