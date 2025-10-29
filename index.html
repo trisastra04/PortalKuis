@@ -339,6 +339,15 @@ service cloud.firestore {
                              <div id="config-loader" class="hidden text-center py-6">
                                 <div class="loader inline-block"></div>
                             </div>
+                            <!-- Tombol Reset Semua Percobaan -->
+                             <div class="pt-6 border-t mt-6">
+                                 <h4 class="text-lg font-semibold text-gray-800 mb-2">Manajemen Percobaan Siswa</h4>
+                                 <p class="text-sm text-gray-600 mb-4">Gunakan tombol ini jika Anda perlu mengizinkan SEMUA siswa untuk mengerjakan kuis lagi (misalnya setelah menghapus data spreadsheet).</p>
+                                 <button id="reset-all-attempts-btn" class="w-full bg-red-600 text-white font-bold py-2 px-4 rounded-lg hover:bg-red-700 transition">
+                                     Reset Semua Percobaan Siswa
+                                 </button>
+                                  <p id="reset-all-status" class="text-sm mt-2 text-center"></p>
+                             </div>
                         </div>
                     </div>
 
@@ -395,6 +404,8 @@ service cloud.firestore {
         const saveConfigBtn = document.getElementById('save-config-btn');
         const configSaveStatus = document.getElementById('config-save-status');
         const configLoader = document.getElementById('config-loader');
+        const resetAllAttemptsBtn = document.getElementById('reset-all-attempts-btn'); // New button
+        const resetAllStatus = document.getElementById('reset-all-status'); // New status element
 
 
         // --- State Management ---
@@ -867,7 +878,7 @@ service cloud.firestore {
                      resetStatus.textContent = `Percobaan untuk ${studentName} berhasil direset.`;
                      resetStatus.classList.remove('text-gray-500');
                      resetStatus.classList.add('text-green-600');
-                     // Update attempt count display (optional, requires re-query or local update)
+                     // Update attempt count display
                      document.getElementById('student-attempt-count').textContent = '0 (Telah Direset)';
                  } catch (error) {
                      console.error("Gagal mereset percobaan:", error);
@@ -979,6 +990,7 @@ service cloud.firestore {
             configClassLevelSelect.value = ''; // Reset dropdown kelas
             configForm.classList.add('hidden'); // Sembunyikan form awal
             configSaveStatus.textContent = ''; // Kosongkan status simpan
+            resetAllStatus.textContent = ''; // Kosongkan status reset semua
         }
         
         configClassLevelSelect.addEventListener('change', async (e) => {
@@ -1068,6 +1080,29 @@ service cloud.firestore {
                  btn.disabled = false;
                  btn.innerHTML = 'Simpan Pengaturan';
              }
+         });
+
+         // --- Reset All Attempts Logic ---
+         resetAllAttemptsBtn.addEventListener('click', () => {
+             showConfirmation('Anda YAKIN ingin mereset SEMUA percobaan siswa? Semua siswa akan bisa mengerjakan kuis lagi.', async () => {
+                 resetAllStatus.textContent = 'Mereset semua percobaan...';
+                 resetAllStatus.classList.remove('text-green-600', 'text-red-600');
+                 resetAllStatus.classList.add('text-gray-500');
+                 try {
+                     const snapshot = await db.collection('quiz_attempts').get();
+                     const batch = db.batch();
+                     snapshot.docs.forEach(doc => batch.delete(doc.ref));
+                     await batch.commit();
+                     resetAllStatus.textContent = 'Semua percobaan siswa berhasil direset.';
+                     resetAllStatus.classList.remove('text-gray-500');
+                     resetAllStatus.classList.add('text-green-600');
+                 } catch (error) {
+                     console.error("Gagal mereset semua percobaan:", error);
+                     resetAllStatus.textContent = 'Gagal mereset semua percobaan.';
+                     resetAllStatus.classList.remove('text-green-600');
+                     resetAllStatus.classList.add('text-red-600');
+                 }
+             });
          });
 
 
