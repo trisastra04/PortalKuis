@@ -58,7 +58,7 @@
         .group:hover .delete-btn {
             opacity: 1;
         }
-        select:disabled {
+        select:disabled, input:disabled {
             background-color: #e9ecef;
             cursor: not-allowed;
         }
@@ -152,10 +152,25 @@ const firebaseConfig = {
                 <pre class="text-xs text-gray-800 overflow-auto"><code>rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    // Aturan spesifik untuk quiz_configs
+    match /quiz_configs/{classLevel} {
+      allow read: if request.auth != null; // Izinkan semua pengguna terautentikasi (guru/siswa) membaca
+      allow write: if request.auth != null; // Izinkan guru (diasumsikan semua pengguna terautentikasi bisa menulis)
+    }
+    // Aturan spesifik untuk quiz_attempts
+    match /quiz_attempts/{attemptId} {
+      allow read, write: if request.auth != null; // Izinkan pengguna terautentikasi (guru/siswa anonim)
+    }
+    // Aturan untuk koleksi lain (sesuaikan jika perlu)
+    match /quiz_sessions/{sessionId} {
+         allow read, write: if request.auth != null;
+    }
+     match /cheating_log/{logId} {
+         allow read, write: if request.auth != null;
+    }
+    // Aturan default (jika tidak cocok di atas)
     match /{document=**} {
-      // Izinkan akses baca dan tulis jika pengguna sudah diautentikasi
-      // (termasuk pengguna anonim yang login oleh aplikasi ini)
-      allow read, write: if request.auth != null;
+      allow read, write: if request.auth != null; // Sesuaikan atau hapus jika perlu
     }
   }
 }</code></pre>
@@ -183,10 +198,11 @@ service cloud.firestore {
             <div class="bg-white rounded-xl shadow-lg p-6 md:p-8">
                 <!-- Tab Navigation -->
                 <div class="border-b border-gray-200 mb-6">
-                    <nav class="-mb-px flex space-x-6">
-                        <button class="tab-btn py-4 px-1 border-b-2 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 transition" data-tab="live">Monitor Sesi Live</button>
-                        <button class="tab-btn py-4 px-1 border-b-2 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 transition" data-tab="pelanggaran">Riwayat Pelanggaran</button>
-                        <button class="tab-btn py-4 px-1 border-b-2 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 transition" data-tab="analisis">Analisis Jawaban</button>
+                    <nav class="-mb-px flex space-x-6 overflow-x-auto">
+                        <button class="tab-btn py-4 px-1 border-b-2 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 transition whitespace-nowrap" data-tab="live">Monitor Sesi Live</button>
+                        <button class="tab-btn py-4 px-1 border-b-2 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 transition whitespace-nowrap" data-tab="pelanggaran">Riwayat Pelanggaran</button>
+                        <button class="tab-btn py-4 px-1 border-b-2 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 transition whitespace-nowrap" data-tab="analisis">Analisis Jawaban</button>
+                        <button class="tab-btn py-4 px-1 border-b-2 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 transition whitespace-nowrap" data-tab="pengaturan">Pengaturan Kuis</button>
                     </nav>
                 </div>
 
@@ -249,6 +265,9 @@ service cloud.firestore {
 
                         <!-- Analysis Results Area -->
                         <div id="analysis-results-area" class="mt-8 border-t pt-6">
+                             <p id="analysis-loading" class="hidden text-center text-gray-500">
+                                 <span class="loader inline-block w-6 h-6 mr-2"></span> Memuat data analisis...
+                             </p>
                             <!-- Class Analysis -->
                             <div id="class-analysis-content" class="hidden">
                                 <div id="class-stats" class="grid grid-cols-2 gap-4 mb-6 text-center"></div>
@@ -270,10 +289,59 @@ service cloud.firestore {
                                     </div>
                                     <button id="show-student-analysis-btn" class="bg-blue-600 text-white font-semibold py-2 px-4 rounded-lg hover:bg-blue-700 transition">Tampilkan</button>
                                 </div>
+                                <div id="student-info-area" class="hidden mt-6 text-center mb-4 p-4 bg-slate-50 rounded-lg">
+                                     <p>Jumlah Percobaan: <strong id="student-attempt-count" class="text-blue-600">0</strong></p>
+                                     <button id="reset-attempt-btn" data-studentid="" class="mt-2 text-sm bg-yellow-500 hover:bg-yellow-600 text-white font-semibold py-1 px-3 rounded-lg transition">Reset Percobaan</button>
+                                     <p id="reset-status" class="text-sm mt-1"></p>
+                                </div>
                                 <div id="student-detail-list" class="mt-6"></div>
                             </div>
                         </div>
                     </div>
+
+                    <!-- Pengaturan Kuis Content -->
+                    <div id="tab-content-pengaturan" class="tab-pane hidden">
+                        <h3 class="text-xl font-semibold text-gray-800 mb-6">Pengaturan Kuis per Jenjang Kelas</h3>
+                        <div class="max-w-xl mx-auto space-y-4">
+                             <div>
+                                <label for="config-class-level" class="block text-sm font-medium text-gray-700">Pilih Jenjang Kelas</label>
+                                <select id="config-class-level" class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md">
+                                    <option value="">-- Pilih --</option>
+                                    <option value="X">Kelas X</option>
+                                    <option value="XI">Kelas XI</option>
+                                    <option value="XII">Kelas XII</option>
+                                </select>
+                            </div>
+
+                            <div id="config-form" class="hidden space-y-4 pt-4 border-t">
+                                 <div>
+                                    <label for="config-num-questions" class="block text-sm font-medium text-gray-700">Jumlah Soal Ditampilkan</label>
+                                    <input type="number" id="config-num-questions" min="1" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                                    <p class="text-xs text-gray-500 mt-1">Biarkan kosong untuk menampilkan semua soal.</p>
+                                </div>
+                                <div class="flex items-center">
+                                    <input id="config-shuffle" type="checkbox" class="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500">
+                                    <label for="config-shuffle" class="ml-2 block text-sm text-gray-900">Acak Urutan Soal</label>
+                                </div>
+                                <div class="flex items-center">
+                                    <input id="config-use-timer" type="checkbox" class="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500">
+                                    <label for="config-use-timer" class="ml-2 block text-sm text-gray-900">Gunakan Timer</label>
+                                </div>
+                                <div id="config-timer-duration-group" class="hidden">
+                                     <label for="config-timer-duration" class="block text-sm font-medium text-gray-700">Durasi Timer (menit)</label>
+                                     <input type="number" id="config-timer-duration" min="1" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                                </div>
+                                <button id="save-config-btn" class="w-full bg-green-600 text-white font-bold py-2 px-4 rounded-lg hover:bg-green-700 transition flex items-center justify-center">
+                                     Simpan Pengaturan
+                                </button>
+                                <p id="config-save-status" class="text-sm mt-2 text-center"></p>
+                            </div>
+                             <div id="config-loader" class="hidden text-center py-6">
+                                <div class="loader inline-block"></div>
+                            </div>
+                        </div>
+                    </div>
+
                 </div>
             </div>
         </main>
@@ -316,13 +384,28 @@ service cloud.firestore {
         const configErrorModal = document.getElementById('config-error-modal');
         let confirmCallback = null;
 
+        // --- Config Tab Elements ---
+        const configClassLevelSelect = document.getElementById('config-class-level');
+        const configForm = document.getElementById('config-form');
+        const configNumQuestionsInput = document.getElementById('config-num-questions');
+        const configShuffleCheckbox = document.getElementById('config-shuffle');
+        const configUseTimerCheckbox = document.getElementById('config-use-timer');
+        const configTimerDurationGroup = document.getElementById('config-timer-duration-group');
+        const configTimerDurationInput = document.getElementById('config-timer-duration');
+        const saveConfigBtn = document.getElementById('save-config-btn');
+        const configSaveStatus = document.getElementById('config-save-status');
+        const configLoader = document.getElementById('config-loader');
+
+
         // --- State Management ---
         let teacherData = [];
         let currentLiveSession = 'quiz_sessions'; // Hardcoded session name
         let liveSessionUnsubscribe = null;
         let cheatingLogUnsubscribe = null;
         let analysisData = {
-            answers: [],
+            answers: [], // Holds PG or Uraian answers based on selection
+            pgAnswers: [], // Cache for PG answers
+            uraianAnswers: [], // Cache for Uraian answers
             questions: []
         };
         
@@ -397,8 +480,25 @@ service cloud.firestore {
             tabButtons.forEach(button => {
                 button.addEventListener('click', () => showTab(button.dataset.tab));
             });
+            // Pre-load PG answers for attempt count
+            preloadAnswerData(); 
         }
         
+        async function preloadAnswerData() {
+            try {
+                const pgResponse = await fetch(CSV_URLS.jawabanPG);
+                const pgText = await pgResponse.text();
+                analysisData.pgAnswers = parseCSV(pgText);
+
+                const uraianResponse = await fetch(CSV_URLS.jawabanUraian);
+                const uraianText = await uraianResponse.text();
+                analysisData.uraianAnswers = parseCSV(uraianText);
+            } catch (err) {
+                console.error("Gagal memuat data jawaban awal:", err);
+                // Optionally show an error message
+            }
+        }
+
         function showTab(tabId) {
             // Unsubscribe from previous listeners
             if (liveSessionUnsubscribe) liveSessionUnsubscribe();
@@ -414,6 +514,7 @@ service cloud.firestore {
             if (tabId === 'live') initLiveMonitorTab();
             if (tabId === 'pelanggaran') initPelanggaranTab();
             if (tabId === 'analisis') initAnalisisTab();
+            if (tabId === 'pengaturan') initPengaturanTab(); // Init new tab
         }
 
         // --- Tab 1: Monitor Sesi Live ---
@@ -526,8 +627,12 @@ service cloud.firestore {
         const analysisClass = document.getElementById('analysis-class');
         const analysisOptions = document.getElementById('analysis-options');
         const analysisResultsArea = document.getElementById('analysis-results-area');
+        const analysisLoading = document.getElementById('analysis-loading');
         const classAnalysisContent = document.getElementById('class-analysis-content');
         const studentAnalysisContent = document.getElementById('student-analysis-content');
+        const studentInfoArea = document.getElementById('student-info-area');
+        const resetAttemptBtn = document.getElementById('reset-attempt-btn');
+        const resetStatus = document.getElementById('reset-status');
 
         function initAnalisisTab() {
             analysisExamType.value = '';
@@ -542,6 +647,7 @@ service cloud.firestore {
             analysisResultsArea.classList.add('hidden');
             classAnalysisContent.classList.add('hidden');
             studentAnalysisContent.classList.add('hidden');
+            studentInfoArea.classList.add('hidden'); // Sembunyikan info siswa
 
             if (!type) {
                  analysisClass.disabled = true;
@@ -549,33 +655,34 @@ service cloud.firestore {
                  return;
             }
 
-            const answerUrl = type === 'pilihan_ganda' ? CSV_URLS.jawabanPG : CSV_URLS.jawabanUraian;
+            analysisLoading.classList.remove('hidden'); // Show loading indicator
+            
+            // Pilih data yang sudah di-preload
+            analysisData.answers = (type === 'pilihan_ganda') ? analysisData.pgAnswers : analysisData.uraianAnswers;
+            
             document.getElementById('analyze-class-btn').disabled = (type === 'uraian');
             document.getElementById('ai-summary-btn').classList.toggle('hidden', type !== 'pilihan_ganda'); // Hide AI summary for uraian
             
-            try {
-                const response = await fetch(answerUrl);
-                const text = await response.text();
-                analysisData.answers = parseCSV(text);
-                
-                const classes = [...new Set(analysisData.answers.map(a => a.Kelas))].sort();
-                analysisClass.innerHTML = '<option value="">-- Pilih Kelas --</option>';
-                classes.forEach(c => {
-                    analysisClass.innerHTML += `<option value="${c}">${c}</option>`;
-                });
-                analysisClass.disabled = false;
-            } catch (err) {
-                alert('Gagal memuat data jawaban.');
-            }
+            const classes = [...new Set(analysisData.answers.map(a => a.Kelas))].sort();
+            analysisClass.innerHTML = '<option value="">-- Pilih Kelas --</option>';
+            classes.forEach(c => {
+                analysisClass.innerHTML += `<option value="${c}">${c}</option>`;
+            });
+            analysisClass.disabled = false;
+            analysisLoading.classList.add('hidden'); // Hide loading indicator
         });
 
         analysisClass.addEventListener('change', async (e) => {
             const className = e.target.value;
+            analysisResultsArea.classList.add('hidden'); // Sembunyikan hasil saat kelas berubah
+            studentInfoArea.classList.add('hidden'); // Sembunyikan info siswa
+
             if (!className) {
                 analysisOptions.classList.add('hidden');
                 return;
             }
             analysisOptions.classList.remove('hidden');
+            analysisLoading.classList.remove('hidden'); // Show loading
 
             let questionUrl = '';
             if (className.startsWith('Kelas X')) questionUrl = CSV_URLS.soalX;
@@ -588,6 +695,8 @@ service cloud.firestore {
                 analysisData.questions = parseCSV(text);
             } catch (err) {
                  alert('Gagal memuat bank soal.');
+            } finally {
+                analysisLoading.classList.add('hidden'); // Hide loading
             }
         });
         
@@ -597,6 +706,7 @@ service cloud.firestore {
         function renderClassAnalysis() {
             analysisResultsArea.classList.remove('hidden');
             studentAnalysisContent.classList.add('hidden');
+            studentInfoArea.classList.add('hidden'); // Sembunyikan info siswa
             classAnalysisContent.classList.remove('hidden');
             document.getElementById('ai-summary-result').classList.add('hidden');
 
@@ -652,7 +762,8 @@ service cloud.firestore {
             analysisResultsArea.classList.remove('hidden');
             classAnalysisContent.classList.add('hidden');
             studentAnalysisContent.classList.remove('hidden');
-            document.getElementById('student-detail-list').innerHTML = '';
+            document.getElementById('student-detail-list').innerHTML = ''; // Clear previous details
+            studentInfoArea.classList.add('hidden'); // Sembunyikan info siswa awal
 
             const selectedClass = analysisClass.value;
             const studentsInClass = [...new Set(analysisData.answers.filter(a => a.Kelas === selectedClass).map(a => a.Nama))].sort();
@@ -666,8 +777,20 @@ service cloud.firestore {
         document.getElementById('show-student-analysis-btn').addEventListener('click', () => {
              const studentName = document.getElementById('analysis-student').value;
              if (!studentName) return;
+
+             const selectedClass = analysisClass.value; // Dapatkan kelas yang dipilih
+             const studentId = `${selectedClass}_${studentName}`.replace(/\s+/g, '_'); // Bentuk ID Firestore
              
              const examType = analysisExamType.value;
+             // Gunakan data PG yang sudah di-preload untuk menghitung percobaan
+             const studentAttemptsCount = analysisData.pgAnswers.filter(a => a.Nama === studentName && a.Kelas === selectedClass).length; 
+
+             // Tampilkan info jumlah percobaan dan tombol reset
+             studentInfoArea.classList.remove('hidden');
+             document.getElementById('student-attempt-count').textContent = studentAttemptsCount;
+             resetAttemptBtn.dataset.studentid = studentId; // Simpan ID di tombol
+             resetStatus.textContent = ''; // Kosongkan status reset
+             
              const studentAttempts = analysisData.answers.filter(a => a.Nama === studentName);
              if (studentAttempts.length === 0) return;
              
@@ -729,6 +852,32 @@ service cloud.firestore {
              }
         });
         
+        // --- Reset Attempt Logic ---
+        resetAttemptBtn.addEventListener('click', async (e) => {
+             const studentDocId = e.target.dataset.studentid;
+             const studentName = document.getElementById('analysis-student').value;
+             if (!studentDocId) return;
+
+             showConfirmation(`Anda yakin ingin mereset percobaan kuis untuk ${studentName}? Murid ini akan bisa mengerjakan kuis lagi.`, async () => {
+                 resetStatus.textContent = 'Mereset...';
+                 resetStatus.classList.remove('text-green-600', 'text-red-600');
+                 resetStatus.classList.add('text-gray-500');
+                 try {
+                     await db.collection('quiz_attempts').doc(studentDocId).delete();
+                     resetStatus.textContent = `Percobaan untuk ${studentName} berhasil direset.`;
+                     resetStatus.classList.remove('text-gray-500');
+                     resetStatus.classList.add('text-green-600');
+                     // Update attempt count display (optional, requires re-query or local update)
+                     document.getElementById('student-attempt-count').textContent = '0 (Telah Direset)';
+                 } catch (error) {
+                     console.error("Gagal mereset percobaan:", error);
+                     resetStatus.textContent = 'Gagal mereset percobaan.';
+                     resetStatus.classList.remove('text-gray-500');
+                     resetStatus.classList.add('text-red-600');
+                 }
+             });
+        });
+
         // --- AI Analysis for Essay ---
         async function analyzeEssayAnswer(btn, questionText, studentAnswer, questionNumber, resultDivId) {
              const resultDiv = document.getElementById(resultDivId);
@@ -824,6 +973,103 @@ service cloud.firestore {
                 btn.innerHTML = '✨ Buat Ringkasan AI';
             }
         });
+        
+        // --- Tab 4: Pengaturan Kuis ---
+        function initPengaturanTab() {
+            configClassLevelSelect.value = ''; // Reset dropdown kelas
+            configForm.classList.add('hidden'); // Sembunyikan form awal
+            configSaveStatus.textContent = ''; // Kosongkan status simpan
+        }
+        
+        configClassLevelSelect.addEventListener('change', async (e) => {
+            const classLevel = e.target.value;
+            configSaveStatus.textContent = ''; // Kosongkan status saat ganti kelas
+            if (!classLevel) {
+                configForm.classList.add('hidden');
+                configLoader.classList.add('hidden');
+                return;
+            }
+
+            configForm.classList.add('hidden');
+            configLoader.classList.remove('hidden');
+
+            try {
+                const docRef = db.collection('quiz_configs').doc(classLevel);
+                const docSnap = await docRef.get();
+
+                if (docSnap.exists) {
+                    const data = docSnap.data();
+                    configNumQuestionsInput.value = data.numQuestions || '';
+                    configShuffleCheckbox.checked = data.shuffle || false;
+                    configUseTimerCheckbox.checked = data.useTimer || false;
+                    configTimerDurationInput.value = data.timerDuration || '';
+                    configTimerDurationGroup.classList.toggle('hidden', !data.useTimer);
+                } else {
+                    // Default values if no config exists
+                    configNumQuestionsInput.value = '';
+                    configShuffleCheckbox.checked = false;
+                    configUseTimerCheckbox.checked = false;
+                    configTimerDurationInput.value = '';
+                    configTimerDurationGroup.classList.add('hidden');
+                }
+                configForm.classList.remove('hidden');
+            } catch (error) {
+                 console.error("Error loading config:", error);
+                 configSaveStatus.textContent = 'Gagal memuat pengaturan.';
+                 configSaveStatus.classList.remove('text-green-600');
+                 configSaveStatus.classList.add('text-red-600');
+            } finally {
+                configLoader.classList.add('hidden');
+            }
+        });
+        
+         configUseTimerCheckbox.addEventListener('change', (e) => {
+             configTimerDurationGroup.classList.toggle('hidden', !e.target.checked);
+             if (!e.target.checked) {
+                 configTimerDurationInput.value = ''; // Kosongkan durasi jika timer tidak aktif
+             }
+         });
+
+         saveConfigBtn.addEventListener('click', async (e) => {
+             const btn = e.currentTarget;
+             btn.disabled = true;
+             btn.innerHTML = '<div class="loader ai-loader"></div> Menyimpan...';
+             configSaveStatus.textContent = '';
+
+             const classLevel = configClassLevelSelect.value;
+             if (!classLevel) return;
+
+             const numQuestions = configNumQuestionsInput.value ? parseInt(configNumQuestionsInput.value) : null;
+             const shuffle = configShuffleCheckbox.checked;
+             const useTimer = configUseTimerCheckbox.checked;
+             const timerDuration = useTimer && configTimerDurationInput.value ? parseInt(configTimerDurationInput.value) : null;
+
+             const configData = {
+                 numQuestions: numQuestions,
+                 shuffle: shuffle,
+                 useTimer: useTimer,
+                 timerDuration: timerDuration
+             };
+
+             try {
+                 await db.collection('quiz_configs').doc(classLevel).set(configData);
+                 configSaveStatus.textContent = 'Pengaturan berhasil disimpan!';
+                 configSaveStatus.classList.remove('text-red-600');
+                 configSaveStatus.classList.add('text-green-600');
+             } catch (error) {
+                 console.error("Error saving config:", error);
+                 configSaveStatus.textContent = 'Gagal menyimpan pengaturan.';
+                 configSaveStatus.classList.remove('text-green-600');
+                 configSaveStatus.classList.add('text-red-600');
+                  if (error.code === 'permission-denied') {
+                    securityErrorModal.classList.remove('hidden');
+                 }
+             } finally {
+                 btn.disabled = false;
+                 btn.innerHTML = 'Simpan Pengaturan';
+             }
+         });
+
 
         // --- Global Listeners ---
         document.getElementById('confirm-no-btn').addEventListener('click', () => {
@@ -841,11 +1087,12 @@ service cloud.firestore {
 
         // --- Init App ---
         async function initializeApp() {
-            if (firebaseConfig.apiKey === "AIzaSy...") {
-                document.getElementById('login-modal').classList.add('hidden');
-                configErrorModal.classList.remove('hidden');
-                return;
-            }
+            // Cek Firebase config placeholder sebelum init
+             if (!firebaseConfig || firebaseConfig.apiKey.startsWith("AIzaSy...")) {
+                 document.getElementById('login-modal').classList.add('hidden');
+                 configErrorModal.classList.remove('hidden');
+                 return;
+             }
 
             try {
                 firebase.initializeApp(firebaseConfig);
