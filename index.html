@@ -152,6 +152,11 @@ const firebaseConfig = {
                 <pre class="text-xs text-gray-800 overflow-auto"><code>rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    // Aturan spesifik untuk kontrol kuis
+    match /quiz_controls/session_status {
+      allow read: if request.auth != null; // Siswa perlu membaca ini
+      allow write: if request.auth != null; // Guru menulis ini
+    }
     // Aturan spesifik untuk quiz_configs
     match /quiz_configs/{classLevel} {
       allow read: if request.auth != null; // Izinkan semua pengguna terautentikasi (guru/siswa) membaca
@@ -211,10 +216,14 @@ service cloud.firestore {
                     <!-- Monitor Sesi Live Content -->
                     <div id="tab-content-live" class="tab-pane">
                         <div id="live-session-monitor">
-                            <div class="flex justify-between items-center mb-4">
+                            <div class="flex flex-col sm:flex-row justify-between items-center mb-4 gap-2">
                                 <h3 id="monitor-title" class="text-xl font-semibold text-gray-800">Memantau Sesi Pengerjaan Kuis</h3>
-                                <button id="reset-session-btn" class="text-sm bg-red-500 hover:bg-red-600 text-white font-semibold py-2 px-4 rounded-lg transition">Reset Sesi Live</button>
+                                <div class="flex space-x-2">
+                                     <button id="force-end-session-btn" class="text-sm bg-orange-500 hover:bg-orange-600 text-white font-semibold py-2 px-4 rounded-lg transition">Paksa Akhiri Semua Sesi</button>
+                                    <button id="reset-session-btn" class="text-sm bg-red-500 hover:bg-red-600 text-white font-semibold py-2 px-4 rounded-lg transition">Reset Sesi Live</button>
+                                </div>
                             </div>
+                            <p id="force-end-status" class="text-sm text-center mb-3"></p>
                             <div class="bg-slate-100 p-4 rounded-lg mb-4 text-center">
                                 <span class="font-semibold">Jumlah Murid Mengerjakan:</span> <span id="student-count" class="font-bold text-blue-600 text-lg">0</span>
                             </div>
@@ -404,8 +413,8 @@ service cloud.firestore {
         const saveConfigBtn = document.getElementById('save-config-btn');
         const configSaveStatus = document.getElementById('config-save-status');
         const configLoader = document.getElementById('config-loader');
-        const resetAllAttemptsBtn = document.getElementById('reset-all-attempts-btn'); // New button
-        const resetAllStatus = document.getElementById('reset-all-status'); // New status element
+        const resetAllAttemptsBtn = document.getElementById('reset-all-attempts-btn'); 
+        const resetAllStatus = document.getElementById('reset-all-status'); 
 
 
         // --- State Management ---
@@ -491,7 +500,6 @@ service cloud.firestore {
             tabButtons.forEach(button => {
                 button.addEventListener('click', () => showTab(button.dataset.tab));
             });
-            // Pre-load PG answers for attempt count
             preloadAnswerData(); 
         }
         
@@ -506,7 +514,6 @@ service cloud.firestore {
                 analysisData.uraianAnswers = parseCSV(uraianText);
             } catch (err) {
                 console.error("Gagal memuat data jawaban awal:", err);
-                // Optionally show an error message
             }
         }
 
@@ -525,13 +532,43 @@ service cloud.firestore {
             if (tabId === 'live') initLiveMonitorTab();
             if (tabId === 'pelanggaran') initPelanggaranTab();
             if (tabId === 'analisis') initAnalisisTab();
-            if (tabId === 'pengaturan') initPengaturanTab(); // Init new tab
+            if (tabId === 'pengaturan') initPengaturanTab(); 
         }
 
         // --- Tab 1: Monitor Sesi Live ---
+        const forceEndSessionBtn = document.getElementById('force-end-session-btn');
+        const forceEndStatus = document.getElementById('force-end-status');
+
         function initLiveMonitorTab() {
             monitorSession(currentLiveSession);
+            forceEndStatus.textContent = ''; // Reset status message
         }
+
+        forceEndSessionBtn.addEventListener('click', () => {
+            showConfirmation(`Anda yakin ingin menghentikan pengerjaan kuis untuk SEMUA siswa yang sedang aktif?`, async () => {
+                forceEndStatus.textContent = 'Mengirim sinyal berhenti...';
+                forceEndStatus.classList.remove('text-green-600', 'text-red-600');
+                forceEndStatus.classList.add('text-blue-600');
+                try {
+                    // Set flag for students to read
+                    await db.collection('quiz_controls').doc('session_status').set({ forceEnd: true });
+                     // Reset flag automatically after a short delay (e.g., 5 seconds)
+                    setTimeout(async () => {
+                        await db.collection('quiz_controls').doc('session_status').set({ forceEnd: false });
+                         forceEndStatus.textContent = 'Sinyal berhenti telah dikirim dan direset.';
+                         forceEndStatus.classList.remove('text-blue-600');
+                         forceEndStatus.classList.add('text-green-600');
+                         console.log("Force end flag set and reset.");
+                     }, 5000); // Reset after 5 seconds
+
+                } catch (error) {
+                    console.error("Gagal mengirim sinyal berhenti:", error);
+                    forceEndStatus.textContent = 'Gagal mengirim sinyal berhenti.';
+                    forceEndStatus.classList.remove('text-blue-600');
+                    forceEndStatus.classList.add('text-red-600');
+                }
+            });
+        });
 
         document.getElementById('reset-session-btn').addEventListener('click', () => {
             showConfirmation(`Anda yakin ingin mereset semua data Sesi Pengerjaan Kuis? Tindakan ini tidak dapat dibatalkan.`, async () => {
@@ -696,16 +733,31 @@ service cloud.firestore {
             analysisLoading.classList.remove('hidden'); // Show loading
 
             let questionUrl = '';
-            if (className.startsWith('Kelas X')) questionUrl = CSV_URLS.soalX;
-            else if (className.startsWith('Kelas XI')) questionUrl = CSV_URLS.soalXI;
-            else if (className.startsWith('Kelas XII')) questionUrl = CSV_URLS.soalXII;
+            // --- FIX: Logic to select correct question bank URL ---
+             if (className.startsWith('Kelas XII')) {
+                 questionUrl = CSV_URLS.soalXII;
+             } else if (className.startsWith('Kelas XI')) {
+                 questionUrl = CSV_URLS.soalXI;
+             } else if (className.startsWith('Kelas X')) {
+                 questionUrl = CSV_URLS.soalX;
+             }
+            // --- END FIX ---
+
 
             try {
-                const response = await fetch(questionUrl);
-                const text = await response.text();
-                analysisData.questions = parseCSV(text);
+                if (questionUrl) {
+                    const response = await fetch(questionUrl);
+                    if (!response.ok) throw new Error(`Gagal memuat bank soal untuk ${className}`);
+                    const text = await response.text();
+                    analysisData.questions = parseCSV(text);
+                } else {
+                    analysisData.questions = []; // Kosongkan jika URL tidak ditemukan
+                     alert(`URL bank soal tidak ditemukan untuk kelas ${className}.`);
+                }
             } catch (err) {
-                 alert('Gagal memuat bank soal.');
+                 console.error("Gagal memuat bank soal:", err);
+                 alert(`Gagal memuat bank soal: ${err.message}`);
+                 analysisData.questions = []; // Kosongkan jika gagal load
             } finally {
                 analysisLoading.classList.add('hidden'); // Hide loading
             }
@@ -1123,7 +1175,7 @@ service cloud.firestore {
         // --- Init App ---
         async function initializeApp() {
             // Cek Firebase config placeholder sebelum init
-             if (!firebaseConfig || firebaseConfig.apiKey.startsWith("AIzaSy...")) {
+             if (!firebaseConfig || !firebaseConfig.apiKey || firebaseConfig.apiKey.startsWith("AIzaSy...")) {
                  document.getElementById('login-modal').classList.add('hidden');
                  configErrorModal.classList.remove('hidden');
                  return;
